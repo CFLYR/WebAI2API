@@ -79,6 +79,24 @@ export function validateServerConfig(data) {
 export function validateBrowserConfig(data) {
     const errors = [];
 
+    // Engine 校验
+    if (data.engine !== undefined && !['camoufox', 'android_cdp'].includes(data.engine)) {
+        errors.push('engine 必须是 camoufox 或 android_cdp');
+    }
+
+    // CDP endpoint 校验
+    if (data.cdpEndpoint !== undefined && typeof data.cdpEndpoint !== 'string') {
+        errors.push('cdpEndpoint 必须是字符串');
+    }
+
+    if (data.cdpTimeout !== undefined) {
+        if (typeof data.cdpTimeout !== 'number' || !Number.isInteger(data.cdpTimeout)) {
+            errors.push('cdpTimeout 必须是整数');
+        } else if (data.cdpTimeout < 1000 || data.cdpTimeout > 300000) {
+            errors.push('cdpTimeout 必须在 1000-300000 范围内');
+        }
+    }
+
     // Path 校验（可选，字符串）
     if (data.path !== undefined && typeof data.path !== 'string') {
         errors.push('path 必须是字符串');

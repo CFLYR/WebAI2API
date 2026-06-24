@@ -84,6 +84,9 @@ export function getBrowserConfig() {
     const cssInject = browser.cssInject || {};
 
     return {
+        engine: browser.engine || 'camoufox',
+        cdpEndpoint: browser.cdpEndpoint || '',
+        cdpTimeout: browser.cdpTimeout || 30000,
         path: browser.path || '',
         headless: browser.headless || false,
         fission: browser.fission !== false, // 默认 true
@@ -114,6 +117,9 @@ export function saveBrowserConfig(data) {
 
     if (!config.browser) config.browser = {};
 
+    if (data.engine !== undefined) config.browser.engine = data.engine;
+    if (data.cdpEndpoint !== undefined) config.browser.cdpEndpoint = data.cdpEndpoint;
+    if (data.cdpTimeout !== undefined) config.browser.cdpTimeout = data.cdpTimeout;
     if (data.path !== undefined) config.browser.path = data.path;
     if (data.headless !== undefined) config.browser.headless = data.headless;
     if (data.fission !== undefined) config.browser.fission = data.fission;

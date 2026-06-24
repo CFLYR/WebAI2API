@@ -121,6 +121,20 @@ docker run -d --name webai-2api \
 docker-compose up -d
 ```
 
+### 📱 Android Termux 实验模式
+
+项目支持通过 Chrome DevTools Protocol 连接已开启远程调试的 Android Chrome/WebView。该模式不会使用 Camoufox 指纹、GeoIP、代理和独立 Profile，仅适合实验或自用环境。
+
+在 `data/config.yaml` 中配置：
+
+```yaml
+browser:
+  engine: android_cdp
+  cdpEndpoint: "http://127.0.0.1:9222"
+```
+
+你需要先把 Android Chrome/WebView 的 DevTools/CDP 暴露到 `127.0.0.1:9222`，例如通过 ADB forward、无线调试或其它本机端口转发方式。确认 `http://127.0.0.1:9222/json/version` 可访问后，再启动服务。
+
 ---
 
 ## ⚡ 快速开始

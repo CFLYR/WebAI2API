@@ -215,7 +215,8 @@ export function loadConfig() {
     }
 
     // Docker 路径兼容处理
-    if ((!config.browser?.path || !fs.existsSync(config.browser.path)) &&
+    if ((!config.browser?.engine || config.browser.engine === 'camoufox') &&
+        (!config.browser?.path || !fs.existsSync(config.browser.path)) &&
         fs.existsSync('/app/camoufox/camoufox')) {
         logger.info('配置器', '检测到容器环境，自动修正浏览器路径为 /app/camoufox/camoufox');
         if (!config.browser) config.browser = {};
@@ -254,6 +255,13 @@ export function loadConfig() {
 
     // 设置 browser 配置默认值
     if (!config.browser) config.browser = {};
+    if (!config.browser.engine) {
+        config.browser.engine = 'camoufox';
+    }
+    if (!['camoufox', 'android_cdp'].includes(config.browser.engine)) {
+        logger.warn('配置器', `无效的 browser.engine: ${config.browser.engine}，使用默认值 camoufox`);
+        config.browser.engine = 'camoufox';
+    }
     if (config.browser.humanizeCursor === undefined) {
         config.browser.humanizeCursor = true;
     }

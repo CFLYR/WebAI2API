@@ -7,10 +7,25 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
+import yaml from 'yaml';
 import { logger } from '../utils/logger.js';
 import { CAMOUFOX_PATCHES } from '../../scripts/postinstall.js';
 
 const PROJECT_ROOT = process.cwd();
+
+function getConfiguredBrowserEngine() {
+    const dataConfigPath = path.join(PROJECT_ROOT, 'data', 'config.yaml');
+    const rootConfigPath = path.join(PROJECT_ROOT, 'config.yaml');
+    const configPath = fs.existsSync(dataConfigPath) ? dataConfigPath : rootConfigPath;
+
+    try {
+        if (!fs.existsSync(configPath)) return 'camoufox';
+        const config = yaml.parse(fs.readFileSync(configPath, 'utf8'));
+        return config?.browser?.engine || 'camoufox';
+    } catch {
+        return 'camoufox';
+    }
+}
 
 /**
  * 计算文件的 MD5 哈希值
@@ -47,6 +62,8 @@ function getCamoufoxExecutablePath() {
  */
 export function preflight() {
     const errors = [];
+    const browserEngine = getConfiguredBrowserEngine();
+    const needsCamoufox = browserEngine !== 'android_cdp';
 
     // 1. 检查 better-sqlite3 预编译文件
     const sqlitePath = path.join(PROJECT_ROOT, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
@@ -55,43 +72,51 @@ export function preflight() {
     }
 
     // 2. 检查 camoufox-js 补丁（通过 MD5 对比，使用 postinstall.js 导出的补丁列表）
-    const patchDir = path.join(PROJECT_ROOT, 'patches');
-    const targetDir = path.join(PROJECT_ROOT, 'node_modules', 'camoufox-js', 'dist');
+    if (needsCamoufox) {
+        const patchDir = path.join(PROJECT_ROOT, 'patches');
+        const targetDir = path.join(PROJECT_ROOT, 'node_modules', 'camoufox-js', 'dist');
 
-    for (const [patchName, targetName] of Object.entries(CAMOUFOX_PATCHES)) {
-        const patchPath = path.join(patchDir, patchName);
-        const targetPath = path.join(targetDir, targetName);
+        for (const [patchName, targetName] of Object.entries(CAMOUFOX_PATCHES)) {
+            const patchPath = path.join(patchDir, patchName);
+            const targetPath = path.join(targetDir, targetName);
 
-        const patchHash = getFileMD5(patchPath);
-        const targetHash = getFileMD5(targetPath);
+            const patchHash = getFileMD5(patchPath);
+            const targetHash = getFileMD5(targetPath);
 
-        if (!patchHash) {
-            // 补丁源文件不存在，跳过检查
-            continue;
-        }
+            if (!patchHash) {
+                // 补丁源文件不存在，跳过检查
+                continue;
+            }
 
-        if (patchHash !== targetHash) {
-            errors.push('camoufox-js 补丁未应用，请运行: pnpm install');
-            break; // 只报告一次
+            if (patchHash !== targetHash) {
+                errors.push('camoufox-js 补丁未应用，请运行: pnpm install');
+                break; // 只报告一次
+            }
         }
     }
 
     // 3. 检查 Camoufox 可执行文件
-    const executablePath = getCamoufoxExecutablePath();
-    if (!fs.existsSync(executablePath)) {
-        errors.push(`Camoufox 可执行文件缺失，请运行: npm run init`);
+    if (needsCamoufox) {
+        const executablePath = getCamoufoxExecutablePath();
+        if (!fs.existsSync(executablePath)) {
+            errors.push(`Camoufox 可执行文件缺失，请运行: npm run init`);
+        }
     }
 
     // 4. 检查 version.json
-    const versionJsonPath = path.join(PROJECT_ROOT, 'camoufox', 'version.json');
-    if (!fs.existsSync(versionJsonPath)) {
-        errors.push('camoufox/version.json 缺失，请运行: npm run init');
+    if (needsCamoufox) {
+        const versionJsonPath = path.join(PROJECT_ROOT, 'camoufox', 'version.json');
+        if (!fs.existsSync(versionJsonPath)) {
+            errors.push('camoufox/version.json 缺失，请运行: npm run init');
+        }
     }
 
     // 5. 检查 GeoLite2-City.mmdb
-    const geoDbPath = path.join(PROJECT_ROOT, 'camoufox', 'GeoLite2-City.mmdb');
-    if (!fs.existsSync(geoDbPath)) {
-        errors.push('camoufox/GeoLite2-City.mmdb 缺失，请运行: npm run init');
+    if (needsCamoufox) {
+        const geoDbPath = path.join(PROJECT_ROOT, 'camoufox', 'GeoLite2-City.mmdb');
+        if (!fs.existsSync(geoDbPath)) {
+            errors.push('camoufox/GeoLite2-City.mmdb 缺失，请运行: npm run init');
+        }
     }
 
     return {

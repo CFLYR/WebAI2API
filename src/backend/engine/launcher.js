@@ -8,8 +8,7 @@
  * - 清理采用三级退出：Playwright close -> SIGTERM -> SIGKILL
  */
 
-import { Camoufox } from 'camoufox-js';
-import { sampleWebGL } from 'camoufox-js/dist/webgl/sample.js';
+import { chromium } from 'playwright-core';
 import { FingerprintGenerator } from 'fingerprint-generator';
 import fs from 'fs';
 import path from 'path';
@@ -22,6 +21,7 @@ import { getBrowserProxy, cleanupProxy } from '../../utils/proxy.js';
 // 全局状态：用于在登录模式下管理残留进程与复用上下文
 let globalBrowserProcess = null;
 let globalContext = null; // 替代 globalBrowser
+let globalRemoteBrowser = null;
 
 /**
  * 清理浏览器资源和进程
@@ -33,9 +33,14 @@ export async function cleanup() {
     // Level 1: 通过 Playwright 协议优雅关闭 Context，保存 Profile
     if (globalContext) {
         try {
-            logger.debug('浏览器', '正在断开远程调试连接并保存 Profile...');
-            await globalContext.close();
+            if (globalContext._remoteCdpContext) {
+                logger.debug('浏览器', '正在释放远程 CDP 浏览器连接引用...');
+            } else {
+                logger.debug('浏览器', '正在断开远程调试连接并保存 Profile...');
+                await globalContext.close();
+            }
             globalContext = null;
+            globalRemoteBrowser = null;
             logger.debug('浏览器', '已关闭浏览器上下文');
         } catch (e) {
             logger.warn('浏览器', `关闭上下文失败: ${e.message}`);
@@ -125,11 +130,126 @@ function getWebGLPlatform(osName) {
     return 'lin';
 }
 
+function getBrowserEngine(config) {
+    return config?.browser?.engine || 'camoufox';
+}
+
+function getCdpEndpoint(browserConfig) {
+    return browserConfig.cdpEndpoint || browserConfig.wsEndpoint || process.env.WEBAI_CDP_ENDPOINT || 'http://127.0.0.1:9222';
+}
+
+async function applyCssInjection(context, cssInjectConfig = {}, markLabel = '默认') {
+    const cssToInject = [];
+
+    if (cssInjectConfig.animation) {
+        cssToInject.push(`
+            *, *::before, *::after {
+                transition: none !important;
+                animation: none !important;
+                transition-property: none !important;
+                scroll-behavior: auto !important;
+            }
+
+            *:not(dummy-selector) {
+                transition-duration: 0s !important;
+                animation-duration: 0s !important;
+                transition-delay: 0s !important;
+                animation-delay: 0s !important;
+            }
+        `);
+    }
+
+    if (cssInjectConfig.filter) {
+        cssToInject.push(`
+            *, *::before, *::after {
+                filter: none !important;
+                backdrop-filter: none !important;
+                box-shadow: none !important;
+                text-shadow: none !important;
+                mix-blend-mode: normal !important;
+            }
+        `);
+    }
+
+    if (cssInjectConfig.font) {
+        cssToInject.push(`
+            html, body {
+                text-rendering: optimizeSpeed !important;
+            }
+        `);
+    }
+
+    if (cssToInject.length === 0) return;
+
+    const cssString = cssToInject.join('\n');
+    await context.addInitScript(`
+        (function() {
+            const style = document.createElement('style');
+            style.textContent = ${JSON.stringify(cssString)};
+            if (document.head) {
+                document.head.appendChild(style);
+            } else {
+                document.addEventListener('DOMContentLoaded', () => {
+                    document.head.appendChild(style);
+                });
+            }
+        })();
+    `);
+
+    const enabledFeatures = [];
+    if (cssInjectConfig.animation) enabledFeatures.push('动画禁用');
+    if (cssInjectConfig.filter) enabledFeatures.push('滤镜禁用');
+    if (cssInjectConfig.font) enabledFeatures.push('字体优化');
+    logger.info('浏览器', `[${markLabel}] CSS 注入已启用: ${enabledFeatures.join(', ')}`);
+}
+
+async function initAndroidCdpBrowser(config, options = {}) {
+    const { instanceName = null } = options;
+    const markLabel = instanceName || '默认';
+    const browserConfig = config?.browser || {};
+    const endpoint = getCdpEndpoint(browserConfig);
+
+    logger.info('浏览器', `[${markLabel}] 使用 android_cdp 引擎连接: ${endpoint}`);
+    logger.warn('浏览器', `[${markLabel}] android_cdp 不提供 Camoufox 指纹、GeoIP、代理和 Profile 隔离能力`);
+
+    const browser = await chromium.connectOverCDP(endpoint, {
+        timeout: browserConfig.cdpTimeout || 30000
+    });
+    globalRemoteBrowser = browser;
+
+    let context = browser.contexts()[0];
+    if (!context) {
+        context = await browser.newContext();
+    }
+    context._remoteCdpContext = true;
+    globalContext = context;
+
+    registerCleanupHandlers();
+
+    context.on('close', async () => {
+        logger.warn('浏览器', `[${markLabel}] CDP 浏览器连接已断开`);
+        globalContext = null;
+        globalRemoteBrowser = null;
+    });
+
+    let page = context.pages().find(p => !p.isClosed());
+    if (!page) {
+        page = await context.newPage();
+    }
+
+    await applyCssInjection(context, browserConfig.cssInject || {}, markLabel);
+
+    logger.info('浏览器', `[${markLabel}] Android Chrome/WebView CDP 连接成功`);
+    return { context, page };
+}
+
 /**
  * 获取或生成持久化指纹 (含 WebGL 配置校验)
  * @param {string} filePath - JSON文件保存路径
  */
 async function getPersistentFingerprint(filePath) {
+    const { sampleWebGL } = await import('camoufox-js/dist/webgl/sample.js');
+
     // 确保 data 目录存在
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
@@ -276,6 +396,15 @@ export async function initBrowserBase(config, options = {}) {
     logger.info('浏览器', `[${markLabel}] 启动浏览器实例...`);
 
     const browserConfig = config?.browser || {};
+    const browserEngine = getBrowserEngine(config);
+
+    if (browserEngine === 'android_cdp') {
+        return await initAndroidCdpBrowser(config, options);
+    }
+
+    if (browserEngine !== 'camoufox') {
+        throw new Error(`不支持的 browser.engine: ${browserEngine}`);
+    }
 
     // 获取指纹对象（指纹文件放在对应的 userDataDir 内）
     const fingerprintPath = path.join(userDataDir, 'fingerprint.json');
@@ -320,6 +449,7 @@ export async function initBrowserBase(config, options = {}) {
     }
 
     // 启动 Camoufox
+    const { Camoufox } = await import('camoufox-js');
     const context = await Camoufox(camoufoxLaunchOptions);
     globalContext = context;
 
@@ -355,73 +485,7 @@ export async function initBrowserBase(config, options = {}) {
     await page.setViewportSize({ width: screenWidth, height: screenHeight });
 
     // CSS 性能优化注入
-    const cssInjectConfig = browserConfig.cssInject || {};
-    const cssToInject = [];
-
-    if (cssInjectConfig.animation) {
-        cssToInject.push(`
-            *, *::before, *::after {
-                /* 过渡和关键帧动画 */
-                transition: none !important;
-                animation: none !important;
-                transition-property: none !important;
-                
-                /* 平滑滚动 */
-                scroll-behavior: auto !important;
-            }
-            
-            /* transform 动画 */
-            *:not(dummy-selector) {
-                transition-duration: 0s !important;
-                animation-duration: 0s !important;
-                transition-delay: 0s !important;
-                animation-delay: 0s !important;
-            }
-        `);
-    }
-
-    if (cssInjectConfig.filter) {
-        cssToInject.push(`
-            *, *::before, *::after {
-                filter: none !important;
-                backdrop-filter: none !important;
-                box-shadow: none !important;
-                text-shadow: none !important;
-                mix-blend-mode: normal !important;
-            }
-        `);
-    }
-
-    if (cssInjectConfig.font) {
-        cssToInject.push(`
-            html, body {
-                text-rendering: optimizeSpeed !important;
-            }
-        `);
-    }
-
-    // 只有当至少一个开关启用时才进行注入，防止影响浏览器指纹
-    if (cssToInject.length > 0) {
-        const cssString = cssToInject.join('\n');
-        await context.addInitScript(`
-            (function() {
-                const style = document.createElement('style');
-                style.textContent = ${JSON.stringify(cssString)};
-                if (document.head) {
-                    document.head.appendChild(style);
-                } else {
-                    document.addEventListener('DOMContentLoaded', () => {
-                        document.head.appendChild(style);
-                    });
-                }
-            })();
-        `);
-        const enabledFeatures = [];
-        if (cssInjectConfig.animation) enabledFeatures.push('动画禁用');
-        if (cssInjectConfig.filter) enabledFeatures.push('滤镜禁用');
-        if (cssInjectConfig.font) enabledFeatures.push('字体优化');
-        logger.info('浏览器', `[${markLabel}] CSS 注入已启用: ${enabledFeatures.join(', ')}`);
-    }
+    await applyCssInjection(context, browserConfig.cssInject || {}, markLabel);
 
     // 返回 context 和 page（导航、预热、cursor 初始化由工作池负责）
     return {

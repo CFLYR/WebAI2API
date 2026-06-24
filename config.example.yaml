@@ -158,6 +158,16 @@ queue:
   imageLimit: 5
 
 browser:
+  # 浏览器引擎:
+  # - camoufox: 默认桌面 Camoufox 浏览器
+  # - android_cdp: 连接已开启 DevTools/CDP 的 Android Chrome/WebView (Termux 实验模式)
+  engine: camoufox
+
+  # android_cdp 模式使用的 CDP 地址，可用环境变量 WEBAI_CDP_ENDPOINT 覆盖
+  # 常见格式: "http://127.0.0.1:9222" 或 "ws://127.0.0.1:9222/devtools/browser/..."
+  cdpEndpoint: "http://127.0.0.1:9222"
+  cdpTimeout: 30000
+
   # 浏览器可执行文件路径 (留空则使用默认的)
   # 非必要不建议修改，否则你要处理很多额外依赖
   # Windows系统示例 "C:\\camoufox\\camoufox.exe"
