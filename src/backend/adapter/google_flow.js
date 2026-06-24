@@ -16,10 +16,20 @@ import {
     useContextDownload
 } from '../utils/index.js';
 import { logger } from '../../utils/logger.js';
-import sharp from 'sharp';
 
 // --- 配置常量 ---
 const TARGET_URL = 'https://labs.google/fx/zh/tools/flow';
+let sharpModule = undefined;
+
+async function getSharp() {
+    if (sharpModule !== undefined) return sharpModule;
+    try {
+        sharpModule = (await import('sharp')).default;
+    } catch {
+        sharpModule = null;
+    }
+    return sharpModule;
+}
 
 /**
  * 根据图片路径检测其宽高比，返回 '16:9' 或 '9:16'
@@ -28,6 +38,8 @@ const TARGET_URL = 'https://labs.google/fx/zh/tools/flow';
  */
 async function detectImageAspect(imgPath) {
     try {
+        const sharp = await getSharp();
+        if (!sharp) return '16:9';
         const metadata = await sharp(imgPath).metadata();
         const { width, height } = metadata;
         // 宽 >= 高 为横版，否则为竖版

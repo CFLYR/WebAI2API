@@ -5,9 +5,20 @@
 
 import fs from 'fs';
 import path from 'path';
-import sharp from 'sharp';
 import { IMAGE_POLICY } from '../../../backend/registry.js';
 import { ERROR_CODES, getErrorMessage } from '../../errors.js';
+
+let sharpModule = undefined;
+
+async function getSharp() {
+    if (sharpModule !== undefined) return sharpModule;
+    try {
+        sharpModule = (await import('sharp')).default;
+    } catch {
+        sharpModule = null;
+    }
+    return sharpModule;
+}
 
 /**
  * 构造解析错误结果
@@ -329,12 +340,16 @@ async function saveBase64Image(dataUrl, tempDir) {
 
     try {
         const buffer = Buffer.from(matches[2], 'base64');
-        // 压缩图片
-        const processedBuffer = await sharp(buffer)
-            .jpeg({ quality: 90 })
-            .toBuffer();
+        const mimeType = matches[1];
+        const sharp = await getSharp();
+        const processedBuffer = sharp
+            ? await sharp(buffer).jpeg({ quality: 90 }).toBuffer()
+            : buffer;
 
-        const filename = `img_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+        const ext = sharp
+            ? 'jpg'
+            : (mimeType.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '').toLowerCase();
+        const filename = `img_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
         const filePath = path.join(tempDir, filename);
         fs.writeFileSync(filePath, processedBuffer);
         return filePath;
