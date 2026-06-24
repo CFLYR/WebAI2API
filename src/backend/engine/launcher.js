@@ -8,7 +8,6 @@
  * - 清理采用三级退出：Playwright close -> SIGTERM -> SIGKILL
  */
 
-import { chromium } from 'playwright-core';
 import { FingerprintGenerator } from 'fingerprint-generator';
 import fs from 'fs';
 import path from 'path';
@@ -138,6 +137,21 @@ function getCdpEndpoint(browserConfig) {
     return browserConfig.cdpEndpoint || browserConfig.wsEndpoint || process.env.WEBAI_CDP_ENDPOINT || 'http://127.0.0.1:9222';
 }
 
+function installAndroidPlaywrightPlatformShim() {
+    if (process.platform !== 'android') return;
+    if (process._webai2apiPlatformShimInstalled) return;
+
+    try {
+        Object.defineProperty(process, 'platform', {
+            value: 'linux'
+        });
+        process._webai2apiPlatformShimInstalled = true;
+        logger.warn('浏览器', '已为 android_cdp 启用 Playwright 平台兼容 shim: android -> linux');
+    } catch (e) {
+        logger.warn('浏览器', `启用 Playwright 平台兼容 shim 失败: ${e.message}`);
+    }
+}
+
 async function applyCssInjection(context, cssInjectConfig = {}, markLabel = '默认') {
     const cssToInject = [];
 
@@ -211,6 +225,9 @@ async function initAndroidCdpBrowser(config, options = {}) {
 
     logger.info('浏览器', `[${markLabel}] 使用 android_cdp 引擎连接: ${endpoint}`);
     logger.warn('浏览器', `[${markLabel}] android_cdp 不提供 Camoufox 指纹、GeoIP、代理和 Profile 隔离能力`);
+
+    installAndroidPlaywrightPlatformShim();
+    const { chromium } = await import('playwright-core');
 
     const browser = await chromium.connectOverCDP(endpoint, {
         timeout: browserConfig.cdpTimeout || 30000
