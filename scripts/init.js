@@ -17,6 +17,7 @@ import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import compressing from 'compressing';
+import yaml from 'yaml';
 import { logger } from '../src/utils/logger.js';
 import { select, input } from '@inquirer/prompts';
 import { SocksProxyAgent } from 'socks-proxy-agent';
@@ -24,7 +25,83 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.join(__dirname, '..');
+const DATA_DIR = path.join(PROJECT_ROOT, 'data');
+const DATA_CONFIG_PATH = path.join(DATA_DIR, 'config.yaml');
+const ROOT_CONFIG_PATH = path.join(PROJECT_ROOT, 'config.yaml');
+const EXAMPLE_CONFIG_PATH = path.join(PROJECT_ROOT, 'config.example.yaml');
 const TEMP_DIR = path.join(PROJECT_ROOT, 'data', 'temp');
+
+function readConfigIfExists() {
+    const configPath = fs.existsSync(DATA_CONFIG_PATH)
+        ? DATA_CONFIG_PATH
+        : (fs.existsSync(ROOT_CONFIG_PATH) ? ROOT_CONFIG_PATH : null);
+
+    if (!configPath) return { config: null, configPath: null };
+
+    try {
+        const config = yaml.parse(fs.readFileSync(configPath, 'utf8'));
+        return { config, configPath };
+    } catch (e) {
+        logger.warn('初始化', `读取配置失败，将忽略现有浏览器引擎配置: ${e.message}`);
+        return { config: null, configPath };
+    }
+}
+
+function getRequestedBrowserEngine() {
+    const engineArg = process.argv.find(arg => arg.startsWith('-browser-engine='));
+    if (engineArg) {
+        return engineArg.split('=')[1];
+    }
+    if (process.argv.includes('-android-cdp')) {
+        return 'android_cdp';
+    }
+    if (process.env.WEBAI_BROWSER_ENGINE) {
+        return process.env.WEBAI_BROWSER_ENGINE;
+    }
+
+    const { config } = readConfigIfExists();
+    return config?.browser?.engine || null;
+}
+
+function ensureAndroidCdpConfig() {
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+
+    let config = null;
+    let sourcePath = DATA_CONFIG_PATH;
+
+    if (fs.existsSync(DATA_CONFIG_PATH)) {
+        config = yaml.parse(fs.readFileSync(DATA_CONFIG_PATH, 'utf8'));
+    } else if (fs.existsSync(ROOT_CONFIG_PATH)) {
+        config = yaml.parse(fs.readFileSync(ROOT_CONFIG_PATH, 'utf8'));
+        sourcePath = ROOT_CONFIG_PATH;
+    } else if (fs.existsSync(EXAMPLE_CONFIG_PATH)) {
+        config = yaml.parse(fs.readFileSync(EXAMPLE_CONFIG_PATH, 'utf8'));
+        sourcePath = EXAMPLE_CONFIG_PATH;
+    } else {
+        config = {};
+    }
+
+    if (!config || typeof config !== 'object') config = {};
+    if (!config.browser || typeof config.browser !== 'object') config.browser = {};
+
+    config.browser.engine = 'android_cdp';
+    if (!config.browser.cdpEndpoint) {
+        config.browser.cdpEndpoint = 'http://127.0.0.1:9222';
+    }
+    if (!config.browser.cdpTimeout) {
+        config.browser.cdpTimeout = 30000;
+    }
+
+    fs.writeFileSync(DATA_CONFIG_PATH, yaml.stringify(config), 'utf8');
+
+    if (sourcePath !== DATA_CONFIG_PATH) {
+        logger.info('初始化', `已基于 ${sourcePath} 生成 Android CDP 配置: ${DATA_CONFIG_PATH}`);
+    } else {
+        logger.info('初始化', `已更新 Android CDP 配置: ${DATA_CONFIG_PATH}`);
+    }
+}
 
 /**
  * 解析命令行代理参数
@@ -534,6 +611,21 @@ async function installCamoufox(platform, arch, proxyUrl) {
         logger.info('初始化', `Node.js 版本: ${nodeVersion}`);
         logger.info('初始化', `Node.js ABI 版本: ${abi}`);
 
+        const requestedEngine = getRequestedBrowserEngine();
+        const isAndroidCdpMode = requestedEngine === 'android_cdp' || platform === 'android';
+
+        if (isAndroidCdpMode && platform === 'android') {
+            ensureAndroidCdpConfig();
+            logger.info('初始化', '检测到 Android/Termux 环境，已启用 android_cdp 实验模式');
+            logger.warn('初始化', '跳过 Camoufox 安装：Android 没有可用的 Camoufox 预编译版本');
+            logger.warn('初始化', '跳过 better-sqlite3 预编译下载：请使用 npm install/npm rebuild 在本机编译');
+            logger.warn('初始化', '启动前请确认 CDP 可访问: curl http://127.0.0.1:9222/json/version');
+            logger.info('初始化', '========================================');
+            logger.info('初始化', 'Android CDP 初始化完成！');
+            logger.info('初始化', '========================================');
+            process.exit(0);
+        }
+
         // 验证平台支持
         if (!validatePlatform(platform, arch)) {
             logger.error('初始化', '不支持的平台！');
@@ -596,10 +688,14 @@ async function installCamoufox(platform, arch, proxyUrl) {
                     break;
             }
         } else {
-            // 正常模式：执行所有步骤
+            // 正常模式：执行所需步骤
             await installBetterSqlite3(platform, arch, abi, proxyUrl);
-            await installCamoufox(platform, arch, proxyUrl);
-            await downloadGeoLiteDb(proxyUrl);
+            if (requestedEngine === 'android_cdp') {
+                logger.info('初始化', 'browser.engine=android_cdp，跳过 Camoufox 和 GeoLite2-City.mmdb 安装');
+            } else {
+                await installCamoufox(platform, arch, proxyUrl);
+                await downloadGeoLiteDb(proxyUrl);
+            }
         }
 
         logger.info('初始化', '========================================');
