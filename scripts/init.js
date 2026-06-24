@@ -618,7 +618,7 @@ async function installCamoufox(platform, arch, proxyUrl) {
             ensureAndroidCdpConfig();
             logger.info('初始化', '检测到 Android/Termux 环境，已启用 android_cdp 实验模式');
             logger.warn('初始化', '跳过 Camoufox 安装：Android 没有可用的 Camoufox 预编译版本');
-            logger.warn('初始化', '跳过 better-sqlite3 预编译下载：请使用 npm install/npm rebuild 在本机编译');
+            logger.warn('初始化', '跳过 better-sqlite3 预编译下载：请使用 pnpm rebuild better-sqlite3 或 npm rebuild better-sqlite3 在本机编译');
             logger.warn('初始化', '启动前请确认 CDP 可访问: curl http://127.0.0.1:9222/json/version');
             logger.info('初始化', '========================================');
             logger.info('初始化', 'Android CDP 初始化完成！');

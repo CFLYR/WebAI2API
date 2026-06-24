@@ -8,10 +8,12 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import yaml from 'yaml';
+import { createRequire } from 'module';
 import { logger } from '../utils/logger.js';
 import { CAMOUFOX_PATCHES } from '../../scripts/postinstall.js';
 
 const PROJECT_ROOT = process.cwd();
+const require = createRequire(import.meta.url);
 
 function getConfiguredBrowserEngine() {
     const dataConfigPath = path.join(PROJECT_ROOT, 'data', 'config.yaml');
@@ -56,6 +58,15 @@ function getCamoufoxExecutablePath() {
     }
 }
 
+function checkBetterSqlite3() {
+    try {
+        require('better-sqlite3');
+        return null;
+    } catch (e) {
+        return `better-sqlite3 无法加载: ${e.message}。请运行 pnpm rebuild better-sqlite3 或 npm rebuild better-sqlite3`;
+    }
+}
+
 /**
  * 执行服务器启动前自检
  * @returns {{ ok: boolean, errors: string[] }}
@@ -65,11 +76,9 @@ export function preflight() {
     const browserEngine = getConfiguredBrowserEngine();
     const needsCamoufox = browserEngine !== 'android_cdp';
 
-    // 1. 检查 better-sqlite3 预编译文件
-    const sqlitePath = path.join(PROJECT_ROOT, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
-    if (!fs.existsSync(sqlitePath)) {
-        errors.push('better-sqlite3 预编译文件缺失，请运行: npm run init');
-    }
+    // 1. 检查 better-sqlite3 native binding 是否可加载
+    const sqliteError = checkBetterSqlite3();
+    if (sqliteError) errors.push(sqliteError);
 
     // 2. 检查 camoufox-js 补丁（通过 MD5 对比，使用 postinstall.js 导出的补丁列表）
     if (needsCamoufox) {
