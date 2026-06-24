@@ -229,9 +229,17 @@ async function initAndroidCdpBrowser(config, options = {}) {
     installAndroidPlaywrightPlatformShim();
     const { chromium } = await import('playwright-core');
 
-    const browser = await chromium.connectOverCDP(endpoint, {
-        timeout: browserConfig.cdpTimeout || 30000
-    });
+    let browser;
+    try {
+        browser = await chromium.connectOverCDP(endpoint, {
+            timeout: browserConfig.cdpTimeout || 30000
+        });
+    } catch (e) {
+        throw new Error(
+            `Android CDP 连接失败: ${e.message}\n` +
+            `请先确认 Chrome/WebView DevTools 已暴露: curl ${endpoint.replace(/\/$/, '')}/json/version`
+        );
+    }
     globalRemoteBrowser = browser;
 
     let context = browser.contexts()[0];

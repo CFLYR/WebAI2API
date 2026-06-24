@@ -133,7 +133,27 @@ browser:
   cdpEndpoint: "http://127.0.0.1:9222"
 ```
 
-你需要先把 Android Chrome/WebView 的 DevTools/CDP 暴露到 `127.0.0.1:9222`，例如通过 ADB forward、无线调试或其它本机端口转发方式。确认 `http://127.0.0.1:9222/json/version` 可访问后，再启动服务。
+你需要先把 Android Chrome/WebView 的 DevTools/CDP 暴露到 `127.0.0.1:9222`。确认下面命令可访问后，再启动服务：
+
+```bash
+curl http://127.0.0.1:9222/json/version
+```
+
+常见方式一：在 Termux 本机用 `socat` 桥接 Chrome DevTools abstract socket：
+
+```bash
+pkg install socat
+socat TCP-LISTEN:9222,reuseaddr,fork ABSTRACT-CONNECT:chrome_devtools_remote
+```
+
+常见方式二：通过电脑 ADB 桥接到手机本机端口：
+
+```bash
+adb forward tcp:9222 localabstract:chrome_devtools_remote
+adb reverse tcp:9222 tcp:9222
+```
+
+如果目标是 WebView，socket 名称通常不是 `chrome_devtools_remote`，而是类似 `webview_devtools_remote_<pid>`，需要替换为实际名称。
 
 ---
 
