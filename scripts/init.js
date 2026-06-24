@@ -151,6 +151,12 @@ function validateABI(abi) {
  * @param {number} maxRetries - 最大重试次数
  */
 async function downloadFile(url, destPath, proxyUrl = null, maxRetries = 3) {
+    // 如果目标文件已存在，直接返回，跳过下载
+    if (fs.existsSync(destPath)) {
+        logger.info('初始化', `文件已存在，跳过下载: ${destPath}`);
+        return destPath;
+    }
+
     if (proxyUrl) {
         const proxyType = proxyUrl.startsWith('socks') ? 'SOCKS5' : 'HTTP';
         logger.info('初始化', `使用 ${proxyType} 代理: ${proxyUrl}`);
@@ -405,18 +411,22 @@ async function installBetterSqlite3(platform, arch, abi, proxyUrl) {
 
     logger.info('初始化', `better-sqlite3 安装成功: ${destPath}`);
 
-    // 清理
+    // 清理 better-sqlite3 相关下载文件
     fs.unlinkSync(downloadPath);
-    // 清理解压后的所有文件
+
+    // 只清理解压产生的 better-sqlite3 相关文件（避免误删其他文件如 camoufox.zip）
     files.forEach(f => {
         const filePath = path.join(TEMP_DIR, f);
         try {
-            if (fs.existsSync(filePath)) {
-                const stat = fs.statSync(filePath);
-                if (stat.isDirectory()) {
-                    fs.rmSync(filePath, { recursive: true, force: true });
-                } else {
-                    fs.unlinkSync(filePath);
+            // 只删除 better_sqlite3.node 文件和 better-sqlite3 相关的目录/文件
+            if (f === nodeFile || f.includes('better-sqlite3')) {
+                if (fs.existsSync(filePath)) {
+                    const stat = fs.statSync(filePath);
+                    if (stat.isDirectory()) {
+                        fs.rmSync(filePath, { recursive: true, force: true });
+                    } else {
+                        fs.unlinkSync(filePath);
+                    }
                 }
             }
         } catch (e) { }
